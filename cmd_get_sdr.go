@@ -67,6 +67,24 @@ func (c *Client) GetSDR(recordID uint16) (response *GetSDRResponse, err error) {
 	return
 }
 
+func (c *Client) GetSDREnhanced(recordID uint16) (*SDR, error) {
+	res, err := c.GetSDR(recordID)
+	if err != nil {
+		return nil, fmt.Errorf("GetSDR failed for recordID (%#02x), err: %s", recordID, err)
+	}
+
+	sdr, err := ParseSDR(res.RecordData, res.NextRecordID)
+	if err != nil {
+		return nil, fmt.Errorf("ParseSDR failed, err: %s", err)
+	}
+
+	if err := c.enhanceSDR(sdr); err != nil {
+		return sdr, fmt.Errorf("enhanceSDR failed, err: %s", err)
+	}
+
+	return sdr, nil
+}
+
 func (c *Client) GetSDRBySensorID(sensorNumber uint8) (*SDR, error) {
 	if SensorNumber(sensorNumber) == SensorNumberReserved {
 		return nil, fmt.Errorf("not valid sensorNumber, %#0x is reserved", sensorNumber)

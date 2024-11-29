@@ -37,8 +37,7 @@ func (res *SetLanConfigParamsResponse) Format() string {
 }
 
 // Todo
-func (c *Client) SetLanConfigParams() (response *SetLanConfigParamsResponse, err error) {
-	request := &SetLanConfigParamsRequest{}
+func (c *Client) SetLanConfigParams(request *SetLanConfigParamsRequest) (response *SetLanConfigParamsResponse, err error) {
 	response = &SetLanConfigParamsResponse{}
 	err = c.Exchange(request, response)
 	return

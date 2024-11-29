@@ -1,5 +1,11 @@
 package ipmi
 
+type Parameter interface {
+	Pack() []byte
+	Unpack(paramData []byte) error
+	Format() string
+}
+
 // Command is the field in an IPMI message
 type Command struct {
 	ID    uint8
@@ -268,8 +274,21 @@ var (
 	CommandErrorReport = Command{ID: 0xff, NetFn: NetFnBridgeRequest, Name: "Error Report (optional)"}
 
 	// Intel DCMI extensions (https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/dcmi-v1-5-rev-spec.pdf)
-	CommandGetDCMIPowerReading = Command{ID: 0x02, NetFn: NetFnGroupExtensionRequest, Name: "GetDCMIPowerReading"}
-	CommandGetDCMIAssetTag     = Command{ID: 0x06, NetFn: NetFnGroupExtensionRequest, Name: "GetDCMIAssetTag"}
+	CommandGetDCMICapabilitiesInfo         = Command{ID: 0x01, NetFn: NetFnGroupExtensionRequest, Name: "Get DCMI Capabilities Info"}
+	CommandGetDCMIPowerReading             = Command{ID: 0x02, NetFn: NetFnGroupExtensionRequest, Name: "Get DCMI Power Reading"}
+	CommandGetDCMIPowerLimit               = Command{ID: 0x03, NetFn: NetFnGroupExtensionRequest, Name: "Get DCMI Power Limit"}
+	CommandSetDCMIPowerLimit               = Command{ID: 0x04, NetFn: NetFnGroupExtensionRequest, Name: "Set DCMI Power Limit"}
+	CommandActivateDCMIPowerLimit          = Command{ID: 0x05, NetFn: NetFnGroupExtensionRequest, Name: "Activate/Deactivate DCMI Power Limit"}
+	CommandGetDCMIAssetTag                 = Command{ID: 0x06, NetFn: NetFnGroupExtensionRequest, Name: "Get DCMI Asset Tag"}
+	CommandGetDCMISensorInfo               = Command{ID: 0x07, NetFn: NetFnGroupExtensionRequest, Name: "Get DCMI Sensor Info"}
+	CommandSetDCMIAssetTag                 = Command{ID: 0x08, NetFn: NetFnGroupExtensionRequest, Name: "Set DCMI Asset Tag"}
+	CommandGetDCMIMgmtControllerIdentifier = Command{ID: 0x09, NetFn: NetFnGroupExtensionRequest, Name: "Get DCMI Management Controller Identifier String"}
+	CommandSetDCMIMgmtControllerIdentifier = Command{ID: 0x0A, NetFn: NetFnGroupExtensionRequest, Name: "Set DCMI Management Controller Identifier String"}
+	CommandSetDCMIThermalLimit             = Command{ID: 0x0B, NetFn: NetFnGroupExtensionRequest, Name: "Set DCMI Thermal Limit"}
+	CommandGetDCMIThermalLimit             = Command{ID: 0x0C, NetFn: NetFnGroupExtensionRequest, Name: "Get DCMI Thermal Limit"}
+	CommandGetDCMITemperatureReadings      = Command{ID: 0x10, NetFn: NetFnGroupExtensionRequest, Name: "Get DCMI Temperature Readings"}
+	CommandSetDCMIConfigurationParams      = Command{ID: 0x12, NetFn: NetFnGroupExtensionRequest, Name: "Set DCMI Configuration Parameters"}
+	CommandGetDCMIConfigurationParams      = Command{ID: 0x13, NetFn: NetFnGroupExtensionRequest, Name: "Get DCMI Configuration Parameters"}
 
 	// Vendor Specific Commands
 	CommandGetSupermicroBiosVersion = Command{ID: 0xAC, NetFn: NetFnOEMSupermicroRequest, Name: "Get Supermicro BIOS Version"}

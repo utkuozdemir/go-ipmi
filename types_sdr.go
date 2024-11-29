@@ -311,7 +311,9 @@ func FormatSDRs(records []*SDR) string {
 		"Entity",
 		"SensorType",
 		"EventReadingType",
+		"SensorValue",
 		"ReadingUnit",
+		"SensorStatus",
 	}
 	table.SetHeader(headers)
 	table.SetFooter(headers)
@@ -330,6 +332,9 @@ func FormatSDRs(records []*SDR) string {
 		var entityInstance EntityInstance
 		var sensorType SensorType
 		var eventReadingType EventReadingType
+		var sensorValue float64
+		var sensorStatus string
+
 		switch recordType {
 		case SDRRecordTypeFullSensor:
 			generatorID = sdr.Full.GeneratorID
@@ -338,6 +343,8 @@ func FormatSDRs(records []*SDR) string {
 			entityInstance = sdr.Full.SensorEntityInstance
 			sensorType = sdr.Full.SensorType
 			eventReadingType = sdr.Full.SensorEventReadingType
+			sensorValue = sdr.Full.SensorValue
+			sensorStatus = sdr.Full.SensorStatus
 
 		case SDRRecordTypeCompactSensor:
 			generatorID = sdr.Compact.GeneratorID
@@ -346,6 +353,8 @@ func FormatSDRs(records []*SDR) string {
 			entityInstance = sdr.Compact.SensorEntityInstance
 			sensorType = sdr.Compact.SensorType
 			eventReadingType = sdr.Compact.SensorEventReadingType
+			sensorValue = sdr.Compact.SensorValue
+			sensorStatus = sdr.Compact.SensorStatus
 
 		default:
 		}
@@ -359,7 +368,9 @@ func FormatSDRs(records []*SDR) string {
 			canonicalEntityString(entityID, entityInstance),
 			sensorType.String(),
 			eventReadingType.String(),
+			fmt.Sprintf("%#.2f", sensorValue),
 			sensorUnit.String(),
+			sensorStatus,
 		})
 	}
 

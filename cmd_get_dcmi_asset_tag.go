@@ -23,7 +23,10 @@ type GetDCMIAssetTagResponse struct {
 }
 
 func (req *GetDCMIAssetTagRequest) Pack() []byte {
-	return []byte{GroupExtensionDCMI, req.Offset, 0x0F}
+	// Number of bytes to read (16 bytes maximum)
+	// using the fixed (maximum) value is OK here.
+	var readBytes = uint8(0x10)
+	return []byte{GroupExtensionDCMI, req.Offset, readBytes}
 }
 
 func (req *GetDCMIAssetTagRequest) Command() Command {
@@ -52,7 +55,7 @@ func (res *GetDCMIAssetTagResponse) Unpack(msg []byte) error {
 }
 
 func (res *GetDCMIAssetTagResponse) Format() string {
-	return fmt.Sprintf("%s (total length: %d)", string(res.AssetTag), res.TotalLength)
+	return fmt.Sprintf("[%s] (returned length: %d,total length: %d)", string(res.AssetTag), len(res.AssetTag), res.TotalLength)
 }
 
 // GetDCMIAssetTag sends a DCMI "Get Asset Tag" command.
