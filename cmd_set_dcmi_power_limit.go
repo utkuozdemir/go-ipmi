@@ -1,28 +1,5 @@
 package ipmi
 
-// [DCMI specification v1.5]: 6.6.3 Set Power Limit
-// Exception Actions, taken if the Power Limit is exceeded and cannot be controlled within the Correction Time Limit
-type DCMIExceptionAction uint8
-
-const (
-	DCMIExceptionAction_NoAction          DCMIExceptionAction = 0x00
-	DCMIExceptionAction_PowerOffAndLogSEL DCMIExceptionAction = 0x01 // Hard Power Off system and log events to SEL
-	DCMIExceptionAction_LogSELOnly        DCMIExceptionAction = 0x11
-)
-
-func (a DCMIExceptionAction) String() string {
-	m := map[DCMIExceptionAction]string{
-		0x00: "No Action",
-		0x01: "Hard Power Off system and log events to SEL",
-		0x11: "Log event to SEL only",
-	}
-	s, ok := m[a]
-	if ok {
-		return s
-	}
-	return "unknown"
-}
-
 // The Set Power Limit command sets the power limit parameters on the system.
 // The power limit defines a threshold which, if exceeded for a configurable amount of time,
 // will trigger a system power off and/or event logging action.
