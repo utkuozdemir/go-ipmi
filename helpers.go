@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kr/pretty"
@@ -311,6 +312,65 @@ func clearBit1(b uint8) uint8 {
 func clearBit0(b uint8) uint8 {
 	return b & 0xfe
 }
+
+func setOrClearBit7(b uint8, cond bool) uint8 {
+	if cond {
+		return b | 0x80
+	}
+	return b & 0x7f
+}
+
+func setOrClearBit6(b uint8, cond bool) uint8 {
+	if cond {
+		return b | 0x40
+
+	}
+	return b & 0xbf
+}
+
+func setOrClearBit5(b uint8, cond bool) uint8 {
+	if cond {
+		return b | 0x20
+	}
+	return b & 0xdf
+}
+
+func setOrClearBit4(b uint8, cond bool) uint8 {
+	if cond {
+		return b | 0x10
+	}
+	return b & 0xef
+}
+
+func setOrClearBit3(b uint8, cond bool) uint8 {
+	if cond {
+		return b | 0x08
+
+	}
+	return b & 0xf7
+}
+
+func setOrClearBit2(b uint8, cond bool) uint8 {
+	if cond {
+		return b | 0x04
+	}
+	return b & 0xfb
+}
+
+func setOrClearBit1(b uint8, cond bool) uint8 {
+	if cond {
+		return b | 0x02
+	}
+	return b & 0xfd
+}
+
+func setOrClearBit0(b uint8, cond bool) uint8 {
+	if cond {
+		return b | 0x01
+	}
+	return b & 0xfe
+}
+
 func isBit7Set(b uint8) bool {
 	return b&0x80 == 0x80
 }
@@ -592,4 +652,12 @@ func parseStringToInt64(s string) (int64, error) {
 		}
 	}
 	return strconv.ParseInt(s, 10, 64)
+}
+
+func stringsList(s []fmt.Stringer) string {
+	ss := make([]string, len(s))
+	for _, v := range s {
+		ss = append(ss, v.String())
+	}
+	return strings.Join(ss, ",")
 }

@@ -19,7 +19,7 @@ func (c *Client) GetFRUData(deviceID uint8) ([]byte, error) {
 
 	data, err := c.readFRUDataByLength(deviceID, 0, fruAreaInfoRes.AreaSizeBytes)
 	if err != nil {
-		return nil, fmt.Errorf("ReadFRUDataAll failed, err: %s", err)
+		return nil, fmt.Errorf("read full fru area data failed, err: %s", err)
 	}
 	c.Debugf("Got %d fru data\n", len(data))
 
@@ -242,7 +242,7 @@ func (c *Client) GetFRUAreaChassis(deviceID uint8, offset uint16) (*FRUChassisIn
 	// now read full area data
 	data, err := c.readFRUDataByLength(deviceID, offset, length)
 	if err != nil {
-		return nil, fmt.Errorf("ReadFRUDataAll failed, err: %s", err)
+		return nil, fmt.Errorf("read full fru area data failed, err: %s", err)
 	}
 	c.Debugf("Got %d fru data\n", len(data))
 
@@ -265,7 +265,7 @@ func (c *Client) GetFRUAreaBoard(deviceID uint8, offset uint16) (*FRUBoardInfoAr
 	// now read full area data
 	data, err := c.readFRUDataByLength(deviceID, offset, length)
 	if err != nil {
-		return nil, fmt.Errorf("ReadFRUDataAll failed, err: %s", err)
+		return nil, fmt.Errorf("read full fru area data failed, err: %s", err)
 	}
 	c.Debugf("Got %d fru data\n", len(data))
 
@@ -288,7 +288,7 @@ func (c *Client) GetFRUAreaProduct(deviceID uint8, offset uint16) (*FRUProductIn
 	// now read full area data
 	data, err := c.readFRUDataByLength(deviceID, offset, length)
 	if err != nil {
-		return nil, fmt.Errorf("ReadFRUDataAll failed, err: %s", err)
+		return nil, fmt.Errorf("read full fru area data failed, err: %s", err)
 	}
 	c.Debugf("Got %d fru data\n", len(data))
 
@@ -319,7 +319,7 @@ func (c *Client) GetFRUAreaMultiRecords(deviceID uint8, offset uint16) ([]*FRUMu
 		recordSize := 5 + length // Record Header + Data Length
 		data, err := c.readFRUDataByLength(deviceID, offset, recordSize)
 		if err != nil {
-			return nil, fmt.Errorf("ReadFRUDataAll failed, err: %s", err)
+			return nil, fmt.Errorf("read full fru area data failed, err: %s", err)
 		}
 		c.Debugf("Got %d fru data\n", len(data))
 

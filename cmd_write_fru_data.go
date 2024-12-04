@@ -20,10 +20,12 @@ func (req *WriteFRUDataRequest) Command() Command {
 }
 
 func (req *WriteFRUDataRequest) Pack() []byte {
-	out := make([]byte, 4)
+	out := make([]byte, 3+len(req.WriteData))
 	packUint8(req.FRUDeviceID, out, 0)
 	packUint16L(req.WriteOffset, out, 1)
-	packBytes(req.WriteData, out, 3)
+	if len(req.WriteData) > 0 {
+		packBytes(req.WriteData, out, 3)
+	}
 	return out
 }
 
@@ -47,7 +49,9 @@ func (res *WriteFRUDataResponse) Format() string {
 	return fmt.Sprintf(`Count written : %d`, res.CountWritten)
 }
 
-// The command writes the specified byte or word to the FRU Inventory Info area. This is a low level direct interface to a non-volatile storage area. This means that the interface does not interpret or check any semantics or formatting for the data being written.
+// The command writes the specified byte or word to the FRU Inventory Info area.
+// This is a low level direct interface to a non-volatile storage area.
+// This means that the interface does not interpret or check any semantics or formatting for the data being written.
 func (c *Client) WriteFRUData(fruDeviceID uint8, writeOffset uint16, writeData []byte) (response *WriteFRUDataResponse, err error) {
 	request := &WriteFRUDataRequest{
 		FRUDeviceID: fruDeviceID,

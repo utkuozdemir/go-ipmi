@@ -191,7 +191,7 @@ The implementation logic of IPMI commands is almost same. See [Contributing](./C
 | Method                  | Status             | corresponding ipmitool usage |
 | ----------------------- | ------------------ | ---------------------------- |
 | GetPEFCapabilities      | :white_check_mark: | pef capabilities             |
-| ArmPEFPostponeTimer     |                    |
+| ArmPEFPostponeTimer     | :white_check_mark: |
 | SetPEFConfigParameters  |                    |
 | GetPEFConfigParameters  |                    |
 | SetLastProcessedEventId |                    |

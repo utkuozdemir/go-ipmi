@@ -17,7 +17,7 @@ type ArmPEFPostponeTimerRequest struct {
 	//        received event's Record ID.
 	//  FEh = Temporary PEF disable.
 	//        The PEF Postpone timer does not countdown from the value.
-	//        The BMC automatically re-enables PEF (if enabled in the PEF configuratio parameters)
+	//        The BMC automatically re-enables PEF (if enabled in the PEF configuration parameters)
 	//        and sets the PEF Postpone timeout to 00h whenever the system
 	//        enters a sleep state, is powered down, or reset. Software can
 	//        cancel this disable by setting this parameter to 00h or 01h-FDh.

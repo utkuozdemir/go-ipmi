@@ -15,32 +15,6 @@ type GetPEFConfigParametersRequest struct {
 	BlockSelector uint8 // 00h if parameter does not require a block number
 }
 
-type PEFConfigParamSelector uint8
-
-const (
-	PEFConfigParamSelector_SetInProgress                    PEFConfigParamSelector = 0x00
-	PEFConfigParamSelector_Control                          PEFConfigParamSelector = 0x01
-	PEFConfigParamSelector_ActionGlobalControl              PEFConfigParamSelector = 0x02
-	PEFConfigParamSelector_StartupDelay                     PEFConfigParamSelector = 0x03
-	PEFConfigParamSelector_AlertStartDelay                  PEFConfigParamSelector = 0x04
-	PEFConfigParamSelector_NumberOfEventFilter              PEFConfigParamSelector = 0x05
-	PEFConfigParamSelector_EventFilterTable                 PEFConfigParamSelector = 0x06
-	PEFConfigParamSelector_EventFilterTableData1            PEFConfigParamSelector = 0x07
-	PEFConfigParamSelector_NumberOfAlertPolicyEntries       PEFConfigParamSelector = 0x08
-	PEFConfigParamSelector_AlertPolicyTable                 PEFConfigParamSelector = 0x09
-	PEFConfigParamSelector_SystemGUID                       PEFConfigParamSelector = 0x0a
-	PEFConfigParamSelector_NumberOfAlertStrings             PEFConfigParamSelector = 0x0b
-	PEFConfigParamSelector_AlertStringKeys                  PEFConfigParamSelector = 0x0c
-	PEFConfigParamSelector_AlertStrings                     PEFConfigParamSelector = 0x0d
-	PEFConfigParamSelector_NumberOfGroupControlTableEntries PEFConfigParamSelector = 0x0e
-	PEFConfigParamSelector_GroupControlTable                PEFConfigParamSelector = 0x0f
-
-	// 96:127
-	// OEM Parameters (optional. Non-volatile or volatile as specified by OEM)
-	// This range is available for special OEM configuration parameters.
-	// The OEM is identified according to the Manufacturer ID field returned by the Get Device ID command.
-)
-
 type GetPEFConfigParametersResponse struct {
 	// Parameter revision.
 	//
@@ -80,6 +54,7 @@ func (res *GetPEFConfigParametersResponse) Unpack(msg []byte) error {
 	}
 
 	res.Revision = msg[0]
+
 	if len(msg) > 1 {
 		res.ConfigData, _, _ = unpackBytes(msg, 1, len(msg)-1)
 	}
@@ -114,48 +89,181 @@ func (c *Client) GetPEFConfigParameters(getRevisionOnly bool, paramSelector PEFC
 	return
 }
 
-func (c *Client) GetPEFConfigParameters_SystemUUID() (param *PEFConfigParam_SystemUUID, err error) {
-	res, err := c.GetPEFConfigParameters(false, PEFConfigParamSelector_SystemGUID, 0, 0)
+type PEFConfig struct {
+	SetInProgress                    *PEFConfigParam_SetInProgress
+	Control                          *PEFConfigParam_Control
+	ActionGlobalControl              *PEFConfigParam_ActionGlobalControl
+	StartupDelay                     *PEFConfigParam_StartupDelay
+	AlertStartupDelay                *PEFConfigParam_AlertStartupDelay
+	NumberOfEventFilters             *PEFConfigParam_NumberOfEventFilters
+	EventFilters                     []*PEFConfigParam_EventFilter
+	EventFiltersData1                []*PEFConfigParam_EventFilterData1
+	NumberOfAlertPolicies            *PEFConfigParam_NumberOfAlertPolicies
+	AlertPolicies                    []*PEFConfigParam_AlertPolicy
+	SystemGUID                       *PEFConfigParam_SystemGUID
+	NumberOfAlertStrings             *PEFConfigParam_NumberOfAlertStrings
+	AlertStringKeys                  []*PEFConfigParam_AlertStringKeys
+	AlertStrings                     []*PEFConfigParam_AlertStrings
+	NumberOfGroupControlTableEntries *PEFConfigParam_NumberOfGroupControlTableEntries
+	GroupControlTable                *PEFConfigParam_GroupControlTable
+}
+
+func (c *Client) GetPEFConfigForParameter(param PEFConfigParameter, setSelector uint8, blockSelector uint8) error {
+	paramSelector := param.PEFConfigParamSelector()
+
+	res, err := c.GetPEFConfigParameters(false, paramSelector, setSelector, blockSelector)
 	if err != nil {
-		return nil, fmt.Errorf("GetPEFConfigParameters failed, err: %s", err)
+		return fmt.Errorf("GetPEFConfigParameters for param (%s) failed, err: %s", paramSelector, err)
 	}
 
-	param = &PEFConfigParam_SystemUUID{}
 	if err := param.Unpack(res.ConfigData); err != nil {
-		return nil, fmt.Errorf("unpack")
+		return fmt.Errorf("unpack failed for param (%s), err: %s", paramSelector, err)
 	}
 
-	return param, nil
-}
-
-// Used to fill in the GUID field in a PET Trap.
-type PEFConfigParam_SystemUUID struct {
-	// [7:1] - reserved
-	// [0]
-	//	1b = BMC uses following value in PET Trap.
-	//	0b = BMC ignores following value and uses value returned from Get System GUID command instead.
-	UseGUID bool
-	GUID    [16]byte
-}
-
-func (param *PEFConfigParam_SystemUUID) Unpack(configData []byte) error {
-	if len(configData) < 17 {
-		return ErrUnpackedDataTooShortWith(len(configData), 17)
-	}
-
-	param.UseGUID = isBit0Set(configData[0])
-	param.GUID = array16(configData[1:17])
+	c.Debugf("PEF Config for param selector (%s)\n%s", paramSelector, param.Format())
 	return nil
 }
 
-func (param *PEFConfigParam_SystemUUID) Format() string {
-	u, err := ParseGUID(param.GUID[:], GUIDModeSMBIOS)
-	if err != nil {
-		return fmt.Sprintf("<invalid UUID bytes> (%s)", err)
+func (c *Client) GetPEFConfig() (pefConfig *PEFConfig, err error) {
+	pefConfig = &PEFConfig{}
+
+	{
+		param := &PEFConfigParam_Control{}
+		if err := c.GetPEFConfigForParameter(param, 0, 0); err != nil {
+			return nil, err
+		}
+		pefConfig.Control = param
 	}
 
-	out := ""
-	out += fmt.Sprintf("UseGUID:   %v\n", param.UseGUID)
-	out += fmt.Sprintf("GUID:      %s\n", u.String())
-	return out
+	{
+		param := &PEFConfigParam_ActionGlobalControl{}
+		if err := c.GetPEFConfigForParameter(param, 0, 0); err != nil {
+			return nil, err
+		}
+		pefConfig.ActionGlobalControl = param
+	}
+
+	{
+		param := &PEFConfigParam_StartupDelay{}
+		if err := c.GetPEFConfigForParameter(param, 0, 0); err != nil {
+			return nil, err
+		}
+		pefConfig.StartupDelay = param
+	}
+
+	{
+		param := &PEFConfigParam_AlertStartupDelay{}
+		if err := c.GetPEFConfigForParameter(param, 0, 0); err != nil {
+			return nil, err
+		}
+		pefConfig.AlertStartupDelay = param
+	}
+
+	{
+		param := &PEFConfigParam_NumberOfEventFilters{}
+		if err := c.GetPEFConfigForParameter(param, 0, 0); err != nil {
+			return nil, err
+		}
+		pefConfig.NumberOfEventFilters = param
+	}
+
+	{
+		for i := uint8(1); i <= pefConfig.NumberOfEventFilters.Value; i++ {
+			param := &PEFConfigParam_EventFilter{}
+			if err := c.GetPEFConfigForParameter(param, i, 0); err != nil {
+				return nil, fmt.Errorf("get event filter number (%d) failed, err: %s", i, err)
+			}
+			pefConfig.EventFilters = append(pefConfig.EventFilters, param)
+		}
+	}
+
+	{
+		for i := uint8(1); i <= pefConfig.NumberOfEventFilters.Value; i++ {
+			param := &PEFConfigParam_EventFilterData1{}
+			if err := c.GetPEFConfigForParameter(param, i, 0); err != nil {
+				return nil, fmt.Errorf("get event filter number (%d) failed, err: %s", i, err)
+			}
+			pefConfig.EventFiltersData1 = append(pefConfig.EventFiltersData1, param)
+		}
+	}
+
+	{
+		// ipmitool pef
+		param := &PEFConfigParam_NumberOfAlertPolicies{}
+		if err := c.GetPEFConfigForParameter(param, 0, 0); err != nil {
+			return nil, err
+		}
+		pefConfig.NumberOfAlertPolicies = param
+	}
+
+	{
+		for i := uint8(1); i < pefConfig.NumberOfAlertPolicies.Value; i++ {
+			param := &PEFConfigParam_AlertPolicy{}
+
+			if err := c.GetPEFConfigForParameter(param, i, 0); err != nil {
+				return nil, fmt.Errorf("get event filter number (%d) failed, err: %s", i, err)
+			}
+			pefConfig.AlertPolicies = append(pefConfig.AlertPolicies, param)
+		}
+	}
+
+	{
+		param := &PEFConfigParam_SystemGUID{}
+		if err := c.GetPEFConfigForParameter(param, 0, 0); err != nil {
+			return nil, err
+		}
+		pefConfig.SystemGUID = param
+	}
+
+	{
+		param := &PEFConfigParam_NumberOfAlertStrings{}
+		if err := c.GetPEFConfigForParameter(param, 0, 0); err != nil {
+			return nil, err
+		}
+		pefConfig.NumberOfAlertStrings = param
+	}
+
+	{
+		for i := uint8(1); i <= pefConfig.NumberOfAlertStrings.Value; i++ {
+			param := &PEFConfigParam_AlertStringKeys{}
+
+			//
+			setSelctor := i
+			blockSelector := uint8(0)
+			if err := c.GetPEFConfigForParameter(param, setSelctor, blockSelector); err != nil {
+				return nil, fmt.Errorf("get alert strings number (%d) failed, err: %s", i, err)
+			}
+			pefConfig.AlertStringKeys = append(pefConfig.AlertStringKeys, param)
+		}
+	}
+
+	{
+		for i := uint8(1); i < pefConfig.NumberOfAlertStrings.Value; i++ {
+			param := &PEFConfigParam_AlertStrings{}
+			setSelctor := i
+			blockSelector := uint8(1)
+			if err := c.GetPEFConfigForParameter(param, setSelctor, blockSelector); err != nil {
+				return nil, fmt.Errorf("get alert strings number (%d) failed, err: %s", i, err)
+			}
+			pefConfig.AlertStrings = append(pefConfig.AlertStrings, param)
+		}
+	}
+
+	// {
+	// 	param := &PEFConfigParam_NumberOfGroupControlTableEntries{}
+	// 	if err := c.getPEFConfigFor(param); err != nil {
+	// 		return nil, err
+	// 	}
+	// 	pefConfig.NumberOfGroupControlTableEntries = param
+	// }
+
+	// {
+	// 	param := &PEFConfigParam_GroupControlTable{}
+	// 	if err := c.getPEFConfigFor(param); err != nil {
+	// 		return nil, err
+	// 	}
+	// 	pefConfig.GroupControlTable = param
+	// }
+
+	return pefConfig, nil
 }

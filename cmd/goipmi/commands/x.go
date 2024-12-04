@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/bougou/go-ipmi"
+	"github.com/kr/pretty"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +29,7 @@ func NewCmdX() *cobra.Command {
 	cmd.AddCommand(NewCmdXGetPayloadActivationStatus())
 	cmd.AddCommand(NewCmdXGetDeviceGUID())
 	cmd.AddCommand(NewCmdXGetSystemGUID())
-	cmd.AddCommand(NewCmdXGetPEFConfigSystemUUID())
+	cmd.AddCommand(NewCmdXGetPEFConfig())
 
 	return cmd
 }
@@ -161,17 +162,17 @@ func NewCmdXGetDeviceGUID() *cobra.Command {
 	return cmd
 }
 
-func NewCmdXGetPEFConfigSystemUUID() *cobra.Command {
+func NewCmdXGetPEFConfig() *cobra.Command {
 	cmd := &cobra.Command{
-		Use: "get-pef-config-system-uuid",
+		Use: "get-pef-config",
 		Run: func(cmd *cobra.Command, args []string) {
-			param, err := client.GetPEFConfigParameters_SystemUUID()
+			pefConfig, err := client.GetPEFConfig()
 			if err != nil {
 				fmt.Println(err)
 				return
 			}
 
-			fmt.Println(param.Format())
+			pretty.Println(pefConfig)
 		},
 	}
 

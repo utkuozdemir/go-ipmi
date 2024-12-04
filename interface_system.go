@@ -126,6 +126,8 @@ func (c *Client) openSendRequest(request Request) ([]byte, error) {
 		dataPtr = &cmdData[0]
 	}
 
+	c.DebugBytes("cmd data", cmdData, 16)
+
 	msg := &open.IPMI_MSG{
 		NetFn:   uint8(request.Command().NetFn),
 		Cmd:     uint8(request.Command().ID),
