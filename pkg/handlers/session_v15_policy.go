@@ -17,8 +17,15 @@ func MinimumPrivilege(netFn, cmd uint8) bmc.PrivilegeLevel {
 		}
 	case NetFnAppRequest:
 		switch cmd {
-		case CmdColdReset, CmdWarmReset:
+		case CmdColdReset, CmdWarmReset,
+			CmdSetUserAccess, CmdSetUsername, CmdSetUserPassword:
+			// Resetting the BMC and writing user configuration require
+			// Administrator (spec Appendix G). Set User Password in particular
+			// must never be reachable from a lesser-privileged session.
 			return bmc.PrivilegeLevelAdministrator
+		case CmdGetUserAccess, CmdGetUsername:
+			// Reading user configuration requires Operator (spec Appendix G).
+			return bmc.PrivilegeLevelOperator
 		default:
 			return bmc.PrivilegeLevelUser
 		}

@@ -70,13 +70,41 @@ func (u *User) VerifyPassword(raw []byte) bool {
 
 // UserStore is a thread-safe registry of BMC users.
 type UserStore struct {
-	mu    sync.RWMutex
-	users map[uint8]*User
+	mu sync.RWMutex
+	// maxUsers is the highest user ID the store advertises (Get User Access
+	// byte 1, spec v2.0§22.27). It bounds the slot range enumerators walk and
+	// is immutable after construction, so it needs no locking.
+	maxUsers uint8
+	users    map[uint8]*User
+}
+
+// UserStoreOption configures a [UserStore] at construction time.
+type UserStoreOption func(*UserStore)
+
+// WithMaxUsers sets the highest user ID the store advertises via Get User
+// Access. n is clamped to the spec range 1..[MaxUsers]; the default is
+// [MaxUsers] (63).
+func WithMaxUsers(n uint8) UserStoreOption {
+	return func(s *UserStore) {
+		if n < 1 {
+			n = 1
+		}
+		if n > MaxUsers {
+			n = MaxUsers
+		}
+		s.maxUsers = n
+	}
 }
 
 // NewUserStore creates a UserStore with the mandatory anonymous user (ID 1).
-func NewUserStore() *UserStore {
-	s := &UserStore{users: make(map[uint8]*User, 4)}
+func NewUserStore(opts ...UserStoreOption) *UserStore {
+	s := &UserStore{
+		maxUsers: MaxUsers,
+		users:    make(map[uint8]*User, 4),
+	}
+	for _, o := range opts {
+		o(s)
+	}
 	// Slot 1 is always the anonymous/null user per spec section 6.9.1.
 	s.users[1] = &User{
 		ID:            1,
@@ -85,6 +113,13 @@ func NewUserStore() *UserStore {
 		ChannelAccess: make(map[uint8]UserChannelAccess),
 	}
 	return s
+}
+
+// MaxUserCount returns the highest user ID the store advertises (default
+// [MaxUsers]). Get User Access reports this so in-band enumerators know how many
+// slots to walk.
+func (s *UserStore) MaxUserCount() uint8 {
+	return s.maxUsers
 }
 
 // copyUser returns a deep copy of u: the struct value (Password is a value
@@ -110,6 +145,13 @@ func copyUser(u *User) *User {
 // the server starts serving; use [UserStore.Update] for runtime changes.
 // Returns [ErrInvalidUserID] for IDs outside 1-63, or [ErrUsernameTaken] if
 // name is non-empty and already in use.
+//
+// Add bounds the ID by the spec maximum ([MaxUsers]) rather than the store's
+// advertised max, and the name-based auth scan walks the full 1..[MaxUsers]
+// range, so a caller could in principle seed an enabled user above the
+// advertised max. No caller does: the store max is only ever lowered for tests,
+// and seeding stays within it. Enforcing the advertised max here is deferred
+// until a caller actually needs it.
 func (s *UserStore) Add(id uint8, name string) (*User, error) {
 	if id < 1 || id > MaxUsers {
 		return nil, ErrInvalidUserID
@@ -193,6 +235,43 @@ func (s *UserStore) Update(id uint8, fn func(*User) error) error {
 		return fmt.Errorf("user %d: %w", id, ErrUserNotFound)
 	}
 	return fn(u)
+}
+
+// Upsert applies fn to the user in slot id under a single write-lock hold,
+// creating the slot first (respecting the store max) when it does not exist.
+// This is the atomic create-or-mutate path handlers use so two concurrent
+// creates on the same empty slot cannot interleave and lose a field, which a
+// separate Add-then-Update sequence would allow.
+//
+// fn runs against a working copy, so a rejected mutation leaves stored state
+// untouched: the slot is committed only when fn returns nil and the resulting
+// non-empty name does not collide with a different slot. A colliding name is
+// rejected with [ErrUsernameTaken] to keep name-based session lookup
+// deterministic. Returns [ErrInvalidUserID] for an id outside 1..max.
+func (s *UserStore) Upsert(id uint8, fn func(*User) error) error {
+	if id < 1 || id > s.maxUsers {
+		return ErrInvalidUserID
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := &User{ID: id, ChannelAccess: make(map[uint8]UserChannelAccess)}
+	if cur, ok := s.users[id]; ok {
+		next = copyUser(cur)
+	}
+	if err := fn(next); err != nil {
+		return err
+	}
+	if next.Name != "" {
+		for otherID, u := range s.users {
+			if otherID != id && u.Name == next.Name {
+				return ErrUsernameTaken
+			}
+		}
+	}
+	next.ID = id
+	s.users[id] = next
+	return nil
 }
 
 // Delete removes a user by ID.  User 1 (anonymous) cannot be deleted.
