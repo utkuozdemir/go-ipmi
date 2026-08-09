@@ -120,6 +120,7 @@ func NewServer(b *bmc.BMC, conn transport.PacketConn, opts ...ServerOption) *Ser
 	handlers.RegisterChassisHandlers(reg)
 	handlers.RegisterStorageHandlers(reg)
 	handlers.RegisterUserHandlers(reg)
+	handlers.RegisterTransportHandlers(reg)
 
 	s := &Server{
 		bmc:     b,

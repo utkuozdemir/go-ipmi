@@ -29,6 +29,14 @@ func MinimumPrivilege(netFn, cmd uint8) bmc.PrivilegeLevel {
 		default:
 			return bmc.PrivilegeLevelUser
 		}
+	case NetFnTransportRequest:
+		switch cmd {
+		case CmdGetLanConfigParam:
+			// Get LAN Configuration Parameters requires Operator (spec Appendix G).
+			return bmc.PrivilegeLevelOperator
+		default:
+			return bmc.PrivilegeLevelUser
+		}
 	default:
 		return bmc.PrivilegeLevelUser
 	}
