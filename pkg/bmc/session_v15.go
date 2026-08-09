@@ -177,6 +177,14 @@ func (s *V15SessionStore) Get(id uint32) (*V15Session, error) {
 	return sess, nil
 }
 
+// Cap returns the maximum number of concurrent v1.5 sessions the store can
+// hold, i.e. the number of slots in the session table.
+func (s *V15SessionStore) Cap() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.max
+}
+
 // CountActiveSessions returns the number of active v1.5 sessions.
 func (s *V15SessionStore) CountActiveSessions() int {
 	s.mu.Lock()

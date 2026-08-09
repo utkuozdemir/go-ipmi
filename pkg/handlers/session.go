@@ -28,6 +28,7 @@ func RegisterSessionHandlers(r *Registry) {
 	r.RegisterFunc(types.CommandGetChannelCipherSuites, handleGetChannelCipherSuites)
 	r.RegisterFunc(types.CommandSetSessionPrivilegeLevel, handleSetSessionPrivilegeLevel)
 	r.RegisterFunc(types.CommandCloseSession, handleCloseSession)
+	r.RegisterFunc(types.CommandGetSessionInfo, handleGetSessionInfo)
 	registerV15SessionHandlers(r)
 }
 
@@ -180,6 +181,133 @@ func handleCloseSession(_ context.Context, hctx *HandlerContext, req []byte) ([]
 		return nil, types.CodeParameterOutOfRange, nil
 	}
 	return nil, types.CodeOK, nil
+}
+
+// ---------------------------------------------------------------------------
+// Get Session Info
+// ---------------------------------------------------------------------------
+
+// Session-index request forms of Get Session Info (spec §22.20, request byte 1).
+const (
+	sessionIndexCurrent  uint8 = 0x00 // active session this command was received over
+	sessionIndexByHandle uint8 = 0xFE // look up by session handle
+	sessionIndexByID     uint8 = 0xFF // look up by session ID
+)
+
+// Session protocol auxiliary-data nibble (response byte 6, bits [7:4]) for an
+// 802.3 LAN channel: the IPMI version the session negotiated.
+const (
+	sessionAuxV15 uint8 = 0x00 // IPMI v1.5
+	sessionAuxV20 uint8 = 0x01 // IPMI v2.0 / RMCP+
+)
+
+// handleGetSessionInfo implements Get Session Info (App 0x3d).
+//
+// It answers the "current session" form (session index 0), which is what a
+// remote console's keepalive polls (see the client's GetCurrentSessionInfo).
+// The response carries the session handle, the total session-table capacity and
+// occupancy, and the current session's user ID, operating privilege level and
+// channel. Both RMCP+ and IPMI v1.5 sessions are supported.
+//
+// Lookup by session index N, by handle (0xFE) or by session ID (0xFF) is not
+// implemented and returns CodeRequestDataFieldInvalid; the reference server has
+// no need to describe sessions other than the caller's own.
+func handleGetSessionInfo(_ context.Context, hctx *HandlerContext, req []byte) ([]byte, types.CompletionCode, error) {
+	if len(req) < 1 {
+		return nil, types.CodeRequestDataTruncated, nil
+	}
+	if hctx == nil || hctx.BMC == nil {
+		return nil, types.CodeCannotExecuteCommandNotSupported, nil
+	}
+	if req[0] != sessionIndexCurrent {
+		return nil, types.CodeRequestDataFieldInvalid, nil
+	}
+
+	var (
+		userID  uint8
+		privLvl uint8
+		channel uint8
+		aux     uint8
+		handle  uint8
+	)
+
+	// The server holds the current session's lock for the whole dispatch, so
+	// reading these session fields here needs no additional locking (see the
+	// HandlerContext concurrency contract).
+	switch {
+	case hctx.Session != nil:
+		aux = sessionAuxV20
+		channel = hctx.Session.Channel
+		privLvl = uint8(hctx.Session.PrivilegeLevel)
+		handle = sessionHandle(hctx.Session.BMCID)
+		if hctx.Session.User != nil {
+			userID = hctx.Session.User.ID
+		}
+	case hctx.V15Session != nil:
+		aux = sessionAuxV15
+		channel = hctx.V15Session.Channel
+		privLvl = uint8(hctx.V15Session.PrivilegeLevel)
+		handle = sessionHandle(hctx.V15Session.SessionID)
+		if hctx.V15Session.User != nil {
+			userID = hctx.V15Session.User.ID
+		}
+	default:
+		// Received over the system interface: there is no current session to
+		// describe.
+		return nil, types.CodeRequestDataFieldInvalid, nil
+	}
+
+	// Possible sessions is the total number of slots across both session tables
+	// this controller maintains; active sessions is their combined occupancy.
+	// The RMCP+ store reports table occupancy (Count) because its per-session
+	// active state is guarded by the session lock rather than the store lock and
+	// so cannot be scanned race-free from here; outside an in-flight handshake
+	// every occupied slot is an active session.
+	//
+	// These are deliberate simplifications: the two counts are summed across two
+	// independent, model-specific session-table pools rather than a single
+	// shared table, and a mid-handshake RMCP+ session (an Open Session request
+	// that never completes RAKP) is counted in occupancy. Only the current
+	// session's own record needs to be exact for the one real caller (a remote
+	// console's keepalive), and it is.
+	possible := hctx.BMC.Sessions.Cap() + hctx.BMC.V15Sessions.Cap()
+	active := hctx.BMC.Sessions.Count() + hctx.BMC.V15Sessions.CountActiveSessions()
+
+	resp := []byte{
+		handle,
+		clampSessionCount(possible),
+		clampSessionCount(active),
+		userID,
+		privLvl,
+		aux<<4 | channel&0x0F,
+	}
+	return resp, types.CodeOK, nil
+}
+
+// sessionHandle derives a stable, non-zero one-byte session handle from a
+// session ID. The reference server keeps no separate handle namespace, so it
+// folds the session ID into the handle byte. A session handle of 0 means "no
+// session" per spec, so a folded value of 0 is reported as 0xFF.
+func sessionHandle(id uint32) uint8 {
+	h := uint8(id) ^ uint8(id>>8) ^ uint8(id>>16) ^ uint8(id>>24)
+	if h == 0 {
+		return 0xFF
+	}
+	return h
+}
+
+// clampSessionCount saturates a session count to the 6-bit field the Get
+// Session Info response carries for possible/active sessions (spec Table 22-26;
+// the high two bits are reserved), so an over-large count cannot bleed into
+// them.
+func clampSessionCount(n int) uint8 {
+	if n < 0 {
+		return 0
+	}
+	if n > 0x3F {
+		return 0x3F
+	}
+	return uint8(n)
 }
 
 // ---------------------------------------------------------------------------

@@ -339,6 +339,14 @@ func (s *SessionStore) Count() int {
 	return len(s.sessions)
 }
 
+// Cap returns the maximum number of concurrent sessions the store can hold,
+// i.e. the number of slots in the session table.
+func (s *SessionStore) Cap() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.max
+}
+
 // InboundSeqValid checks whether seq is within the acceptable sliding window
 // defined by the IPMI spec (section 6.12.13):  +15 / -16 of the last accepted value.
 // Session sequence numbers start at 1; 0 is reserved for pre-session packets.
