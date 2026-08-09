@@ -22,8 +22,16 @@ import (
 )
 
 // HandlerContext carries per-request BMC state to a [Handler].
-// All fields are read-only from the handler's perspective; mutations must go
-// through the store methods (which are goroutine-safe).
+//
+// Concurrency contract:
+//   - Session / V15Session: the server holds the session's lock for the entire
+//     dispatch, so a handler may read and write these session fields directly
+//     (only Set Session Privilege Level does, on PrivilegeLevel). Handlers must
+//     NOT take the session lock themselves; it is already held.
+//   - User / Channel: independent snapshot copies, safe to read without locking
+//     but not connected to the store. To change a user or channel at runtime,
+//     use [bmc.UserStore.Update] or [bmc.ChannelStore.Set].
+//   - BMC: goroutine-safe; mutate shared state only through its store methods.
 type HandlerContext struct {
 	// Command identifies the request being dispatched.  [Registry.Dispatch]
 	// fills it in from the command table, so middleware and handlers can name

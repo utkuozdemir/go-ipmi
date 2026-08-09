@@ -62,7 +62,9 @@ type Server struct {
 type ServerOption func(*Server)
 
 // WithHandlerRegistry replaces the default handler registry.
-// Use this to add OEM commands or override built-in handlers.
+// Use this to add OEM commands or override built-in handlers. All registration
+// on r must be complete before [Server.Serve] is called; the registry is
+// read-only and unsynchronized during dispatch.
 func WithHandlerRegistry(r *handlers.Registry) ServerOption {
 	return func(s *Server) { s.reg = r }
 }
@@ -284,6 +286,13 @@ func (s *Server) handleRMCPPlus(addr net.Addr, pkt []byte) {
 		if err != nil {
 			return
 		}
+		// Hold the session lock across the whole per-packet transaction:
+		// integrity verify, inbound-seq check/update, activity update, decrypt,
+		// dispatch, outbound-seq increment, and send. Every session field
+		// access below (and in the session commands reached via reg.Dispatch)
+		// is therefore serialized.
+		sess.Lock()
+		defer sess.Unlock()
 		if !verifyRMCPPlusIntegrity(pkt, sess, authenticated) {
 			return
 		}
@@ -291,6 +300,7 @@ func (s *Server) handleRMCPPlus(addr net.Addr, pkt []byte) {
 			return
 		}
 		sess.InboundSeq = inboundSeq
+		sess.LastActivity = s.clk.Now()
 		s.dispatchIPMISession(ctx, addr, sess, payload, encrypted)
 	}
 }
@@ -308,6 +318,8 @@ func (s *Server) dispatchIPMIPreSession(ctx context.Context, addr net.Addr, payl
 }
 
 // dispatchIPMISession handles IPMI commands within an authenticated session.
+// The caller must hold sess's lock; this method reads and writes session fields
+// (including OutboundSeq) and dispatches session commands that may do the same.
 func (s *Server) dispatchIPMISession(ctx context.Context, addr net.Addr, sess *bmc.Session, payload []byte, encrypted bool) {
 	ipmiPayload := payload
 	if encrypted && len(sess.K2) >= 16 {

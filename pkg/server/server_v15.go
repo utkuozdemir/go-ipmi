@@ -64,7 +64,14 @@ func (s *Server) dispatchIPMIv15SessionUnauth(addr net.Addr, pkt []byte, sess *t
 	}
 
 	v15Sess, err := s.bmc.V15Sessions.Get(hdr.SessionID)
-	if err != nil || v15Sess.State != bmc.V15SessionStateActive {
+	if err != nil {
+		return
+	}
+	// Hold the session lock across the whole transaction (seq accept, dispatch,
+	// activity update, outbound-seq allocation, send).
+	v15Sess.Lock()
+	defer v15Sess.Unlock()
+	if v15Sess.State != bmc.V15SessionStateActive {
 		return
 	}
 
@@ -85,7 +92,7 @@ func (s *Server) dispatchIPMIv15SessionUnauth(addr net.Addr, pkt []byte, sess *t
 
 	ctx := context.Background()
 	respData, cc, _ := s.reg.Dispatch(ctx, hctx, netFn, cmd, data)
-	s.bmc.V15Sessions.Touch(v15Sess)
+	v15Sess.LastActivity = s.clk.Now()
 
 	ipmiResp := protocol.BuildIPMIResponse(netFn, cmd, seq, uint8(cc), respData)
 	outboundSeq := v15Sess.NextOutboundSeq()
@@ -103,6 +110,12 @@ func (s *Server) dispatchIPMIv15Auth(addr net.Addr, pkt []byte, sess *types.Sess
 	if err != nil {
 		return
 	}
+	// Hold the session lock across seq validate/accept, auth verify, dispatch
+	// (which may activate the session, taking the store lock in the required
+	// session-then-store order), activity update, outbound-seq allocation, and
+	// send.
+	v15Sess.Lock()
+	defer v15Sess.Unlock()
 
 	authType := bmc.V15AuthType(hdr.AuthType)
 	if authType != v15Sess.AuthType {
@@ -165,7 +178,7 @@ func (s *Server) dispatchIPMIv15Auth(addr net.Addr, pkt []byte, sess *types.Sess
 
 	ctx := context.Background()
 	respData, cc, _ := s.reg.Dispatch(ctx, hctx, netFn, cmd, data)
-	s.bmc.V15Sessions.Touch(v15Sess)
+	v15Sess.LastActivity = s.clk.Now()
 
 	ipmiResp := protocol.BuildIPMIResponse(netFn, cmd, seq, uint8(cc), respData)
 	outboundSeq := v15Sess.NextOutboundSeq()

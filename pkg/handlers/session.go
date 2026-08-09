@@ -211,15 +211,18 @@ func HandleOpenSession(ctx context.Context, b *bmc.BMC, data []byte) ([]byte, er
 		return buildOpenSessionError(tag, consoleID, code), nil
 	}
 
-	sess, err := b.Sessions.Allocate(consoleID, authAlg, intAlg, cryptAlg)
+	maxPrivilege := bmc.PrivilegeLevel(maxPriv)
+	if maxPrivilege == 0 {
+		maxPrivilege = bmc.PrivilegeLevelAdministrator
+	}
+
+	// Allocate fully initializes the session (including MaxPrivilege and
+	// Channel) before inserting it into the store, so no lock-free field write
+	// happens after it becomes reachable.
+	sess, err := b.Sessions.Allocate(consoleID, authAlg, intAlg, cryptAlg, maxPrivilege, lanChannelNumber)
 	if err != nil {
 		return buildOpenSessionError(tag, consoleID, 0x01), nil // Insufficient resources
 	}
-	sess.MaxPrivilege = bmc.PrivilegeLevel(maxPriv)
-	if sess.MaxPrivilege == 0 {
-		sess.MaxPrivilege = bmc.PrivilegeLevelAdministrator
-	}
-	sess.Channel = lanChannelNumber
 
 	authPayload, integPayload, cryptPayload := rmcpplus.NewAlgorithmPayloads(authAlg, intAlg, cryptAlg)
 	resp := &rmcpplus.OpenSessionResponse{
@@ -264,6 +267,16 @@ func HandleRAKP1(ctx context.Context, b *bmc.BMC, data []byte) ([]byte, error) {
 	if err != nil {
 		return rakp2Error(tag, 0, 0x02), nil // Invalid Session ID
 	}
+	// Hold the session lock across every field read/write below. This handler
+	// runs outside the server's per-packet transaction, so it must lock itself.
+	// Session-lock-then-store-lock is the required order; the Close calls below
+	// take only the store lock, which is safe under this order.
+	sess.Lock()
+	defer sess.Unlock()
+	// Refresh activity: RAKP runs outside the server's per-packet dispatch, which
+	// is where LastActivity is normally bumped, so a session handshaking near the
+	// inactivity limit would otherwise be reaped despite this real traffic.
+	sess.LastActivity = b.Clock().Now()
 	if sess.State != bmc.SessionStatePending {
 		return rakp2Error(tag, sess.ConsoleID, 0x08), nil // Inactive Session ID
 	}
@@ -338,6 +351,13 @@ func HandleRAKP3(ctx context.Context, b *bmc.BMC, data []byte) ([]byte, error) {
 	if err != nil {
 		return rakp4Error(tag, 0, 0x02), nil // Invalid Session ID
 	}
+	// Hold the session lock across all field reads/writes and key derivation.
+	// See HandleRAKP1 for the lock-order rationale.
+	sess.Lock()
+	defer sess.Unlock()
+	// Refresh activity for the same reason as HandleRAKP1: keep a mid-handshake
+	// session from being reaped on creation time alone.
+	sess.LastActivity = b.Clock().Now()
 
 	// If the console sent a non-zero status in RAKP3, it means the console
 	// rejected RAKP2.  Close the session and return an error response.

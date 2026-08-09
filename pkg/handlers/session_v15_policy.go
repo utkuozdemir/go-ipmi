@@ -50,7 +50,7 @@ func fillChannelAuthCapsByte4(resp []byte, b *bmc.BMC, ch *bmc.Channel) {
 		return
 	}
 	resp[2] = 0x04 // Non-Null usernames enabled
-	if b != nil && len(b.KG) > 0 {
+	if b != nil && len(b.ResolvedKG()) > 0 {
 		resp[2] |= 0x20
 	}
 	if !ch.PerMessageAuth {

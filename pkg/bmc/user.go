@@ -87,7 +87,27 @@ func NewUserStore() *UserStore {
 	return s
 }
 
-// Add creates a new user at the given ID.
+// copyUser returns a deep copy of u: the struct value (Password is a value
+// array, Name a string, both safe to copy) plus a fresh ChannelAccess map. The
+// copy shares no mutable state with the stored user, so callers may read it
+// without holding any lock.
+func copyUser(u *User) *User {
+	if u == nil {
+		return nil
+	}
+	cp := *u
+	if u.ChannelAccess != nil {
+		cp.ChannelAccess = make(map[uint8]UserChannelAccess, len(u.ChannelAccess))
+		for k, v := range u.ChannelAccess {
+			cp.ChannelAccess[k] = v
+		}
+	}
+	return &cp
+}
+
+// Add creates a new user at the given ID and returns the live [*User] for
+// construction-time seeding. Mutating the returned pointer is only safe before
+// the server starts serving; use [UserStore.Update] for runtime changes.
 // Returns [ErrInvalidUserID] for IDs outside 1-63, or [ErrUsernameTaken] if
 // name is non-empty and already in use.
 func (s *UserStore) Add(id uint8, name string) (*User, error) {
@@ -114,7 +134,8 @@ func (s *UserStore) Add(id uint8, name string) (*User, error) {
 	return u, nil
 }
 
-// Get returns the user at the given ID, or [ErrUserNotFound].
+// Get returns a snapshot copy of the user at the given ID, or [ErrUserNotFound].
+// The returned [*User] is a private copy; mutate the store via [UserStore.Update].
 func (s *UserStore) Get(id uint8) (*User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -122,24 +143,25 @@ func (s *UserStore) Get(id uint8) (*User, error) {
 	if !ok {
 		return nil, fmt.Errorf("user %d: %w", id, ErrUserNotFound)
 	}
-	return u, nil
+	return copyUser(u), nil
 }
 
-// GetByName returns the user with the given name, or [ErrUserNotFound].
-// An empty name matches the anonymous user (ID 1).
+// GetByName returns a snapshot copy of the user with the given name, or
+// [ErrUserNotFound]. An empty name matches the anonymous user (ID 1).
 func (s *UserStore) GetByName(name string) (*User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, u := range s.users {
 		if u.Name == name {
-			return u, nil
+			return copyUser(u), nil
 		}
 	}
 	return nil, fmt.Errorf("user %q: %w", name, ErrUserNotFound)
 }
 
-// FindEnabledByNameOnChannel scans user IDs 1..MaxUsers in order and returns
-// the first enabled user with a matching name and channel access (spec v1.5§18.24 / v2.0§22.27).
+// FindEnabledByNameOnChannel scans user IDs 1..MaxUsers in order and returns a
+// snapshot copy of the first enabled user with a matching name and channel
+// access (spec v1.5§18.24 / v2.0§22.27).
 func (s *UserStore) FindEnabledByNameOnChannel(name string, channel uint8) (*User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -155,9 +177,22 @@ func (s *UserStore) FindEnabledByNameOnChannel(name string, channel uint8) (*Use
 		if !ok || !access.Enabled {
 			continue
 		}
-		return u, nil
+		return copyUser(u), nil
 	}
 	return nil, fmt.Errorf("user %q on channel %d: %w", name, channel, ErrUserNotFound)
+}
+
+// Update runs fn against the live [*User] for id under the store write lock, the
+// race-free way to mutate a user at runtime (e.g. from a Set User Password
+// handler). Returns [ErrUserNotFound] if id is not present.
+func (s *UserStore) Update(id uint8, fn func(*User) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[id]
+	if !ok {
+		return fmt.Errorf("user %d: %w", id, ErrUserNotFound)
+	}
+	return fn(u)
 }
 
 // Delete removes a user by ID.  User 1 (anonymous) cannot be deleted.

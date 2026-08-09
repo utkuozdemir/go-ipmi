@@ -58,7 +58,20 @@ const (
 )
 
 // V15Session holds IPMI v1.5 session state.
+//
+// Concurrency: the session mutex guards the per-packet fields written during
+// dispatch: the inbound/outbound sequence counters, InboundRcvd, and writes to
+// LastActivity. State, User, MaxPrivilege and PrivilegeLevel are written only by
+// [V15SessionStore.Activate], which runs under the store lock while its caller
+// holds the session lock, so those fields are covered by both locks; the Count*
+// helpers read them under the store lock, and eviction reads State, CreatedAt and
+// LastActivity under the session lock (via TryLock). TempSessionID, SessionID,
+// AuthType, Challenge, Channel and CreatedAt are set before the session is
+// published. Lock order is always session-then-store.
 type V15Session struct {
+	// mu serializes access to all fields below.
+	mu sync.Mutex
+
 	TempSessionID uint32
 	SessionID     uint32
 	State         V15SessionState
@@ -99,18 +112,33 @@ func NewV15SessionStore(clk clock.Clock) *V15SessionStore {
 	}
 }
 
+// Lock acquires the session's field lock. See the [Session] type doc for the
+// lock order relative to the store lock.
+func (sess *V15Session) Lock() { sess.mu.Lock() }
+
+// Unlock releases the session's field lock.
+func (sess *V15Session) Unlock() { sess.mu.Unlock() }
+
 // CreatePending allocates a pending v1.5 session after Get Session Challenge.
+// The session is fully initialized before it is inserted into the map.
 func (s *V15SessionStore) CreatePending(authType V15AuthType, user *User, challenge [16]byte, channel uint8) (*V15Session, error) {
+	s.EvictExpired()
+
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.evictExpiredLocked()
-
 	if len(s.sessions) >= s.max {
-		if !s.evictOldestPendingLocked() {
+		s.mu.Unlock()
+		if !s.evictOldestPending() {
+			return nil, ErrSessionFull
+		}
+		s.mu.Lock()
+		// Re-check capacity: evictOldestPending released the store lock, so a
+		// concurrent CreatePending could have refilled the slot it freed.
+		if len(s.sessions) >= s.max {
+			s.mu.Unlock()
 			return nil, ErrSessionFull
 		}
 	}
+	defer s.mu.Unlock()
 
 	tempID, err := randomUint32()
 	if err != nil {
@@ -147,16 +175,6 @@ func (s *V15SessionStore) Get(id uint32) (*V15Session, error) {
 		return nil, fmt.Errorf("v1.5 session 0x%08x: %w", id, ErrNoSession)
 	}
 	return sess, nil
-}
-
-// Touch records valid session activity for inactivity timeout (spec v1.5§6.11.13 / v2.0§6.12.15).
-func (s *V15SessionStore) Touch(sess *V15Session) {
-	if sess == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess.LastActivity = s.clock.Now()
 }
 
 // CountActiveSessions returns the number of active v1.5 sessions.
@@ -210,6 +228,12 @@ func (s *V15SessionStore) CountActiveSessionsWithMaxPrivilegeAtLeast(min Privile
 // empty receive bitmap — otherwise the first packet (seq == inboundSeq) is
 // rejected as a duplicate and clients such as ipmitool stall for a full LAN
 // timeout before retrying with inboundSeq+1.
+//
+// Precondition: the caller must hold pending's session lock. Activate mutates
+// fields of an already-published session (State, User's derived privilege, seq
+// counters, LastActivity) while holding only the store lock; it is safe only
+// because the sole caller holds the session lock during dispatch, so the lock
+// order stays session-then-store and no reader observes a half-updated session.
 func (s *V15SessionStore) Activate(pending *V15Session, permanentID, inboundSeq, outboundSeq uint32, maxPrivilege PrivilegeLevel) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -264,42 +288,88 @@ func (s *V15SessionStore) Close(id uint32) error {
 	return nil
 }
 
-// EvictExpired removes inactive v1.5 sessions past the timeout.
-func (s *V15SessionStore) EvictExpired() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.evictExpiredLocked()
+// v15SessionEntry pairs a session with its current map key so eviction can
+// delete by key without reading any session field under the store lock.
+type v15SessionEntry struct {
+	id   uint32
+	sess *V15Session
 }
 
-func (s *V15SessionStore) evictExpiredLocked() int {
+func (s *V15SessionStore) snapshot() []v15SessionEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries := make([]v15SessionEntry, 0, len(s.sessions))
+	for id, sess := range s.sessions {
+		entries = append(entries, v15SessionEntry{id: id, sess: sess})
+	}
+	return entries
+}
+
+// deleteIfIdentity removes id under the store lock, but only if it still maps to
+// the same session pointer. See [SessionStore.deleteIfIdentity] for why the
+// caller holds the session lock across the re-check and this delete.
+func (s *V15SessionStore) deleteIfIdentity(id uint32, sess *V15Session) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cur, ok := s.sessions[id]; ok && cur == sess {
+		delete(s.sessions, id)
+		return 1
+	}
+	return 0
+}
+
+// EvictExpired removes inactive v1.5 sessions past the timeout. It tries each
+// session's lock with TryLock and skips any busy one, so it never blocks on a
+// session lock (which would self-deadlock when Get Session Challenge triggers
+// eviction while holding its own session lock). See [SessionStore.EvictExpired]
+// for the snapshot / TryLock / delete shape.
+func (s *V15SessionStore) EvictExpired() int {
+	entries := s.snapshot()
 	now := s.clock.Now()
 	limit := s.timeout + DefaultInactivityTimeoutTolerance
+
 	n := 0
-	for id, sess := range s.sessions {
-		if now.Sub(sess.LastActivity) > limit {
-			delete(s.sessions, id)
-			n++
+	for _, e := range entries {
+		if !e.sess.mu.TryLock() {
+			continue
 		}
+		if now.Sub(e.sess.LastActivity) > limit {
+			n += s.deleteIfIdentity(e.id, e.sess)
+		}
+		e.sess.mu.Unlock()
 	}
 	return n
 }
 
-func (s *V15SessionStore) evictOldestPendingLocked() bool {
-	var oldest *V15Session
-	var oldestID uint32
-	for id, sess := range s.sessions {
-		if sess.State == V15SessionStatePending {
-			if oldest == nil || sess.CreatedAt.Before(oldest.CreatedAt) {
-				oldest = sess
-				oldestID = id
-			}
+func (s *V15SessionStore) evictOldestPending() bool {
+	entries := s.snapshot()
+
+	var oldest *v15SessionEntry
+	var oldestCreated time.Time
+	for i := range entries {
+		e := entries[i]
+		if !e.sess.mu.TryLock() {
+			continue
+		}
+		pending := e.sess.State == V15SessionStatePending
+		created := e.sess.CreatedAt
+		e.sess.mu.Unlock()
+		if pending && (oldest == nil || created.Before(oldestCreated)) {
+			oldest = &entries[i]
+			oldestCreated = created
 		}
 	}
 	if oldest == nil {
 		return false
 	}
-	delete(s.sessions, oldestID)
-	return true
+	if !oldest.sess.mu.TryLock() {
+		return false
+	}
+	defer oldest.sess.mu.Unlock()
+	if oldest.sess.State != V15SessionStatePending {
+		return false
+	}
+	return s.deleteIfIdentity(oldest.id, oldest.sess) > 0
 }
 
 // v15SeqDiff returns seq-high as a signed delta with uint32 wrap-around.
