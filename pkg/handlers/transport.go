@@ -20,9 +20,9 @@ const (
 const lanParamRevision uint8 = 0x11
 
 // standardPrimaryRMCPPort is the IANA-assigned RMCP port (623) used for IPMI
-// over LAN. The reference server always listens on it, so it is reported as a
-// constant. NetworkHAL does not model a configurable RMCP port; a BMC that
-// exposes one would override this handler.
+// over LAN. It is reported for param #8 unless the NetworkHAL advertises a
+// non-zero port, which lets a BMC listening on a non-standard port make in-band
+// software discover it.
 const standardPrimaryRMCPPort uint16 = 623
 
 // RegisterTransportHandlers adds all Transport (LAN) command handlers to r.
@@ -100,10 +100,28 @@ func handleGetLanConfigParam(ctx context.Context, hctx *HandlerContext, req []by
 		return lanParamResponse(lanAuthTypeSupport(hctx.BMC).Pack()...), types.CodeOK, nil
 
 	case types.LanConfigParamSelector_PrimaryRMCPPort:
-		// 2-byte port, LS-first (spec Table 23-4 param #8).
-		port := make([]byte, 2)
-		binary.LittleEndian.PutUint16(port, standardPrimaryRMCPPort)
-		return lanParamResponse(port...), types.CodeOK, nil
+		// 2-byte port, LS-first (spec Table 23-4 param #8). Reported from the
+		// NetworkHAL configuration when it advertises a non-zero port, otherwise
+		// the standard 623; this stays answerable without a NIC. A NetworkHAL read
+		// error maps to the HAL completion code, like the address parameters,
+		// rather than silently reporting 623.
+		port := standardPrimaryRMCPPort
+
+		if network := hctx.BMC.HAL().Network(); network != nil {
+			cfg, err := network.GetConfig(ctx)
+			if err != nil {
+				return nil, codeFromHalErr(err), nil
+			}
+
+			if cfg.Port != 0 {
+				port = cfg.Port
+			}
+		}
+
+		out := make([]byte, 2)
+		binary.LittleEndian.PutUint16(out, port)
+
+		return lanParamResponse(out...), types.CodeOK, nil
 
 	case types.LanConfigParamSelector_IP,
 		types.LanConfigParamSelector_IPSource,

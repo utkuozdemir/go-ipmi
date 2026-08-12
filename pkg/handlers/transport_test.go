@@ -302,3 +302,40 @@ func TestHandleGetLanConfigParamNoNetwork(t *testing.T) {
 		t.Errorf("primary RMCP port without NIC: completion code = 0x%02x, want OK", uint8(cc))
 	}
 }
+
+// TestHandleGetLanConfigParamPrimaryRMCPPort proves param #8 reports a
+// non-standard RMCP port from the NetworkHAL configuration and falls back to
+// 623 when none is configured. This is how an emulated BMC listening on an
+// OS-assigned port makes in-band software discover it.
+func TestHandleGetLanConfigParamPrimaryRMCPPort(t *testing.T) {
+	t.Run("custom port from config", func(t *testing.T) {
+		cfg := testIPConfig
+		cfg.Port = 62345
+
+		b := newTestBMCWithNetwork(t, cfg)
+
+		resp, cc := getLanParam(t, b, types.LanConfigParamSelector_PrimaryRMCPPort)
+
+		var param types.LanConfigParam_PrimaryRMCPPort
+
+		unpackParamData(t, resp, cc, &param)
+
+		if param.Port != 62345 {
+			t.Errorf("port = %d, want 62345", param.Port)
+		}
+	})
+
+	t.Run("zero config port falls back to 623", func(t *testing.T) {
+		b := newTestBMCWithNetwork(t, testIPConfig) // Port left zero
+
+		resp, cc := getLanParam(t, b, types.LanConfigParamSelector_PrimaryRMCPPort)
+
+		var param types.LanConfigParam_PrimaryRMCPPort
+
+		unpackParamData(t, resp, cc, &param)
+
+		if param.Port != 623 {
+			t.Errorf("port = %d, want 623", param.Port)
+		}
+	})
+}
